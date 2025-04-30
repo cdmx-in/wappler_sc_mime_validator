@@ -4,12 +4,14 @@ const { readFileSync } = require('fs');
 exports.mime_validator = async function (options) {
     let accepts = this.parseRequired(options.accepts, 'string', 'A comma seperated list of accepted mime\'s is required.');
 
-    let output = { "is_valid": false, "message": "", "fileData": null, "code":"ERR101" };
+    let output = { "is_valid": false, "message": "", "fileData": null, "code": "ERR101" };
 
     const inputName = this.parseRequired(options.input_name, 'string', 'Input name is required.');
-    const detedPdfScripts = this.parseOptional(options.detedPdfScripts, 'boolean', false);
+    const detectPdfScripts = this.parseOptional(options.detectPdfScripts, 'boolean', false);
 
     const file = this.req.files[inputName];
+    output.fileData = file;
+    delete output.fileData.data;
 
     if (!file) {
         output.message = 'File not found.';
@@ -52,7 +54,7 @@ exports.mime_validator = async function (options) {
         return output;
     }
 
-    if (fileMime === "application/pdf" && detedPdfScripts) {
+    if (fileMime === "application/pdf" && detectPdfScripts) {
         if (hasEmbeddedJavaScript(buffer)) {
             output.code = "ERR102";
             output.message = 'Embedded JavaScript detected.';
@@ -61,9 +63,7 @@ exports.mime_validator = async function (options) {
     }
 
     output.is_valid = true;
-    output.fileData = file;
     output.code = 0;
-    delete output.fileData.data;
     return output;
 }
 
