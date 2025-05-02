@@ -20,6 +20,7 @@
           { "name": "accepts", "optionName": "accepts", "title": "Accepts", "type": "text", "required": true, "help": "Enter comma seperated list of allowed mime types", serverDataBindings: true},
           { "name": "input_name", "optionName": "input_name", "title": "Input Name", "type": "text", "required": true, "help": "Enter comma seperated list of allowed mime types", serverDataBindings: true},
           { "name": "detectPdfScripts", "optionName": "detectPdfScripts", "title": "Detect PDF Scripts", "type": "boolean", "defaultValue": false, "help": "Inspects the PDF for embedded JavaScript." },
+          { "name": "detectSvgScripts", "optionName": "detectSvgScripts", "title": "Detect SVG Scripts", "type": "boolean", "defaultValue": true, "help": "Inspects the SVG for embedded JavaScript." },
         ]
       },
       {

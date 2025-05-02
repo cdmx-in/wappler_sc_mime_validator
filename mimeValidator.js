@@ -8,6 +8,7 @@ exports.mime_validator = async function (options) {
 
     const inputName = this.parseRequired(options.input_name, 'string', 'Input name is required.');
     const detectPdfScripts = this.parseOptional(options.detectPdfScripts, 'boolean', false);
+    const detectSvgScripts = this.parseOptional(options.detectSvgScripts, 'boolean', true);
 
     const file = this.req.files[inputName];
     output.fileData = file;
@@ -48,8 +49,9 @@ exports.mime_validator = async function (options) {
 
 
     let bufferMime = await detectBufferMime(fileBuffer);
+    let formattedFileMime = detectFilenameMime(file.name, bufferMime);
 
-    if (fileMime !== bufferMime) {
+    if (formattedFileMime !== bufferMime) {
         output.message = 'File type not allowed.';
         return output;
     }
@@ -58,6 +60,13 @@ exports.mime_validator = async function (options) {
         if (hasEmbeddedJavaScript(buffer)) {
             output.code = "ERR102";
             output.message = 'Embedded JavaScript detected.';
+            return output;
+        }
+    }
+    if (fileMime === "image/svg+xml" && detectSvgScripts) {
+        if (hasMaliciousSVGContent(fileBuffer                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           )) {
+            output.code = "ERR103";
+            output.message = 'Potential XSS risk: Dangerous content found in SVG.';
             return output;
         }
     }
@@ -71,5 +80,18 @@ exports.mime_validator = async function (options) {
 function hasEmbeddedJavaScript(buffer) {
     const text = buffer.toString('latin1'); // PDF is mostly binary but readable
     const patterns = [/\/JavaScript\b/, /\/JS\b/, /\/AA\b/]; // common triggers
+    return patterns.some((pattern) => pattern.test(text));
+}
+
+function hasMaliciousSVGContent(buffer) {
+    const text = buffer.toString('utf8'); // SVG is plain text (XML)
+    const patterns = [
+        /<script\b/i,                     // Inline <script> tag
+        /on\w+="[^"]*"/i,                 // Event handlers like onclick, onload, etc.
+        /on\w+='[^']*'/i,                 // Same, with single quotes
+        /javascript:/i,                  // javascript: URLs
+        /data:text\/html/i,              // Potential data URIs with HTML
+        /<[^>]+xlink:href=['"]?javascript:/i // xlink with javascript
+    ];
     return patterns.some((pattern) => pattern.test(text));
 }

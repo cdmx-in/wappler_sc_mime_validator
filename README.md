@@ -23,6 +23,7 @@ Validates the uploaded file's MIME type and ensures the file is safe for use.
   - `Accepts` (required): A comma-separated list of acceptable MIME types. Example: `"image/jpeg, image/png"`.
   - `Input Name` (required): The name of the file input field in the request.
   - `Detect PDF Scripts`: If `checked`, the extension checks for embedded JavaScript in PDF files.
+  - `Detect SVG Scripts`: If `checked`, the extension checks for embedded JavaScript in SVG files.
   - `Output`: If`checked`, it returns the object described below.
 
 #### Returns
@@ -37,5 +38,6 @@ An object containing the following properties:
 
 - `ERR101`: File type not allowed or file missing.
 - `ERR102`: PDF file contains embedded JavaScript.
+- `ERR103`: SVG file contains embedded JavaScript.
 
 
