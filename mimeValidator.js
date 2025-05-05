@@ -13,6 +13,8 @@ exports.mime_validator = async function (options) {
     const file = this.req.files[inputName];
     output.fileData = file;
     delete output.fileData.data;
+    delete output.fileData.mv;
+    delete output.fileData.tempFilePath;
 
     if (!file) {
         output.message = 'File not found.';

@@ -4,14 +4,55 @@
     "module": "mimeValidator",
     "action": "mime_validator",
     "groupTitle": "File Management",
-    "groupIcon": "fas fa-cloud-upload-alt comp-exec",
+    "groupIcon": "fas fa-check comp-exec",
     "title": "Mime Validator - @@var(name)@@",
-    "icon": "fas fa-cloud-upload-alt comp-exec",
+    "icon": "fas fa-check comp-exec",
     "usedModules": {
       "node": {
         "mime-detect": "^1.3.0",
       }
     },
+    dataScheme: [
+      {name: 'is_valid', type: 'boolean'},
+      {name: 'message', type: 'text'},
+      {
+        name: 'fileData', "type": "object",
+          "sub": [
+            {
+              "name": "name",
+              "title": "name",
+              "type": "text"
+            },
+            {
+              "name": "size",
+              "title": "size",
+              "type": "number"
+            },
+            {
+              "name": "encoding",
+              "title": "encoding",
+              "type": "text"
+            },
+            {
+              "name": "mimetype",
+              "title": "mimetype",
+              "type": "text"
+            },
+            {
+              "name": "md5",
+              "title": "md5",
+              "type": "text"
+            },
+            {
+              "name": "truncated",
+              "title": "truncated",
+              "type": "boolean"
+            }
+          ]
+      },
+      {name: 'code', type: 'text'}
+    ],
+    dataPickObject: true,
     "properties": [
       {
         "group": "Mime Validator",
@@ -19,8 +60,13 @@
           { "name": "name", "optionName": "name", "title": "Name", "type": "text", "required": true, "defaultValue": "mime_validator", "help": "This will be the name used in output" },
           { "name": "accepts", "optionName": "accepts", "title": "Accepts", "type": "text", "required": true, "help": "Enter comma seperated list of allowed mime types", serverDataBindings: true},
           { "name": "input_name", "optionName": "input_name", "title": "Input Name", "type": "text", "required": true, "help": "Enter comma seperated list of allowed mime types", serverDataBindings: true},
+        ]
+      },
+      {
+        "group": "Script Checks",
+        "variables": [
           { "name": "detectPdfScripts", "optionName": "detectPdfScripts", "title": "Detect PDF Scripts", "type": "boolean", "defaultValue": false, "help": "Inspects the PDF for embedded JavaScript." },
-          { "name": "detectSvgScripts", "optionName": "detectSvgScripts", "title": "Detect SVG Scripts", "type": "boolean", "defaultValue": true, "help": "Inspects the SVG for embedded JavaScript." },
+          { "name": "detectSvgScripts", "optionName": "detectSvgScripts", "title": "Detect SVG Scripts", "type": "boolean", "defaultValue": false, "help": "Inspects the SVG for embedded JavaScript." },
         ]
       },
       {
