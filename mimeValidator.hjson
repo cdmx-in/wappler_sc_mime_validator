@@ -66,7 +66,7 @@
         "group": "Script Checks",
         "variables": [
           { "name": "detectPdfScripts", "optionName": "detectPdfScripts", "title": "Detect PDF Scripts", "type": "boolean", "defaultValue": false, "help": "Inspects the PDF for embedded JavaScript." },
-          { "name": "detectSvgScripts", "optionName": "detectSvgScripts", "title": "Detect SVG Scripts", "type": "boolean", "defaultValue": false, "help": "Inspects the SVG for embedded JavaScript." },
+          { "name": "detectSvgScripts", "optionName": "detectSvgScripts", "title": "Detect SVG Scripts", "type": "boolean", "defaultValue": true, "help": "Inspects the SVG for embedded JavaScript." },
         ]
       },
       {
