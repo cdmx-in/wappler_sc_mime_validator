@@ -31,7 +31,7 @@ Validates the uploaded file's MIME type and ensures the file is safe for use.
 An object containing the following properties:
 - `is_valid`: A boolean indicating whether the file is valid.
 - `message`: A message describing the validation result.
-- `fileData`: The file data object (if valid).
+- `fileData`: The file data object.
 - `code`: A code representing the validation status (`ERR101`, `ERR102`, or `0` for success).
 
 ### Error Codes

@@ -1,99 +1,152 @@
 const { detectBufferMime, detectFilenameMime } = require('mime-detect');
-const { readFileSync } = require('fs');
+const { readFile } = require('fs/promises');
 
 exports.mime_validator = async function (options) {
-    let accepts = this.parseRequired(options.accepts, 'string', 'A comma seperated list of accepted mime\'s is required.');
+    const acceptsStr = this.parseRequired(
+        options.accepts,
+        'string',
+        'A comma separated list of accepted MIME types is required.'
+    );
+    const inputName = this.parseRequired(
+        options.input_name,
+        'string',
+        'Input name is required.'
+    );
+    const detectPdfScripts = this.parseOptional(
+        options.detectPdfScripts,
+        'boolean',
+        false
+    );
+    const detectSvgScripts = this.parseOptional(
+        options.detectSvgScripts,
+        'boolean',
+        true
+    );
 
-    let output = { "is_valid": false, "message": "", "fileData": null, "code": "ERR101" };
-
-    const inputName = this.parseRequired(options.input_name, 'string', 'Input name is required.');
-    const detectPdfScripts = this.parseOptional(options.detectPdfScripts, 'boolean', false);
-    const detectSvgScripts = this.parseOptional(options.detectSvgScripts, 'boolean', true);
-
+    // 2) fetch file
     const file = this.req.files[inputName];
-    output.fileData = file;
-    delete output.fileData.data;
-    delete output.fileData.mv;
-    delete output.fileData.tempFilePath;
-
     if (!file) {
-        output.message = 'File not found.';
-        return output;
-
+        return {
+            is_valid: false,
+            message: 'File not found.',
+            code: 'ERR101',
+            fileData: null,
+        };
     }
 
-    let fileMime = detectFilenameMime(file.name);
-    let acceptedMime = accepts.split(',').map(item => item.trim());
+    // 3) extract only the fields we want for output.fileData
+    const { name, size, encoding, mimetype, md5, tempFilePath } = file;
+    let output = {
+        is_valid: false,
+        message: '',
+        code: 'ERR101',
+        fileData: { name, size, encoding, mimetype, md5 },
+    };
 
-    let isValidFileMime = acceptedMime.some(mime => {
-        // If mime is a wildcard for a type (e.g., application/*, image/*, */*), check for a match
-        if (mime === "*/*" || fileMime === mime) {
-            return true;
-        }
-
-        // Match with wildcard (e.g., application/* matches application/pdf)
-        const [type, subtype] = mime.split('/');
-        const [fileType, fileSubtype] = fileMime.split('/');
-
-        if (type === "*" || fileType === type) {
-            return subtype === "*" || fileSubtype === subtype;
-        }
-
-        return false;
-    });
-
-    if (!isValidFileMime) {
-        output.message = 'File type not allowed.';
+    // 4) read buffer asynchronously
+    let fileBuffer;
+    try {
+        fileBuffer = await readFile(tempFilePath);
+    } catch (err) {
+        output.message = 'Unable to read file.';
         return output;
     }
 
-    const fileBuffer = readFileSync(file.tempFilePath);
+    // 5) initial extension-based MIME
+    const extMime = detectFilenameMime(name);
+    const baseExt = extMime.split(';')[0].trim();
 
+    // 6) prepare accept-list and wildcard matcher
+    const accepted = acceptsStr.split(',').map(s => s.trim());
+    const matchesWildcard = mime =>
+        accepted.some(a => {
+            if (a === '*/*' || a === mime) return true;
+            const [t, st] = a.split('/');
+            const [mt, mst] = mime.split('/');
+            if (t === '*' || t === mt) {
+                return st === '*' || mst === st;
+            }
+            return false;
+        });
 
-    let bufferMime = await detectBufferMime(fileBuffer);
-    let formattedFileMime = detectFilenameMime(file.name, bufferMime);
-
-    if (formattedFileMime !== bufferMime) {
-        output.message = 'File type not allowed.';
+    // 7) early reject based on extension check
+    if (!matchesWildcard(baseExt)) {
+        output.message = 'File type not allowed (extension).';
         return output;
     }
 
-    if (fileMime === "application/pdf" && detectPdfScripts) {
-        if (hasEmbeddedJavaScript(buffer)) {
-            output.code = "ERR102";
-            output.message = 'Embedded JavaScript detected.';
-            return output;
-        }
-    }
-    if (fileMime === "image/svg+xml" && detectSvgScripts) {
-        if (hasMaliciousSVGContent(fileBuffer                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           )) {
-            output.code = "ERR103";
-            output.message = 'Potential XSS risk: Dangerous content found in SVG.';
-            return output;
-        }
+    // 8) sniff buffer MIME (may include “; charset=…”)
+    const bufferMimeRaw = await detectBufferMime(fileBuffer);
+    const baseBuf = bufferMimeRaw.split(';')[0].trim();
+
+    if (!matchesWildcard(baseBuf)) {
+        output.message = 'File type not allowed (content).';
+        return output;
     }
 
-    output.is_valid = true;
-    output.code = 0;
-    return output;
-}
+    // // 9) normalize the final MIME string only if bufferMimeRaw lacks parameters
+    // const finalMime = bufferMimeRaw.includes(';')
+    //     ? bufferMimeRaw
+    //     : detectFilenameMime(name, bufferMimeRaw);
 
+    // 10) deep script scans
+    if (
+        detectPdfScripts &&
+        baseBuf === 'application/pdf' &&
+        hasEmbeddedJavaScript(fileBuffer)
+    ) {
+        return {
+            ...output,
+            code: 'ERR102',
+            message: 'Embedded JavaScript detected in PDF.',
+        };
+    }
+
+    if (
+        detectSvgScripts &&
+        baseBuf === 'image/svg+xml' &&
+        hasMaliciousSVGContent(fileBuffer)
+    ) {
+        return {
+            ...output,
+            code: 'ERR103',
+            message: 'Potential XSS risk: Dangerous SVG content.',
+        };
+    }
+
+    // 11) all checks passed
+    return {
+        ...output,
+        is_valid: true,
+        code: 0,
+        // if you want to return the MIME you actually used, include finalMime here:
+        // detectedMime: finalMime
+    };
+};
+
+// unchanged helpers
 
 function hasEmbeddedJavaScript(buffer) {
-    const text = buffer.toString('latin1'); // PDF is mostly binary but readable
-    const patterns = [/\/JavaScript\b/, /\/JS\b/, /\/AA\b/]; // common triggers
-    return patterns.some((pattern) => pattern.test(text));
+    const text = buffer.toString('latin1');
+    const patterns = [/\/JavaScript\b/, /\/JS\b/, /\/AA\b/];
+    return patterns.some(p => p.test(text));
+}
+
+function hasMaliciousPDFContent(buffer) {
+    const text = buffer.toString('latin1');
+    const patterns = [/\/JavaScript\b/, /\/JS\b/, /\/AA\b/];
+    return patterns.some(p => p.test(text));
 }
 
 function hasMaliciousSVGContent(buffer) {
-    const text = buffer.toString('utf8'); // SVG is plain text (XML)
+    const text = buffer.toString('utf8');
     const patterns = [
-        /<script\b/i,                     // Inline <script> tag
-        /on\w+="[^"]*"/i,                 // Event handlers like onclick, onload, etc.
-        /on\w+='[^']*'/i,                 // Same, with single quotes
-        /javascript:/i,                  // javascript: URLs
-        /data:text\/html/i,              // Potential data URIs with HTML
-        /<[^>]+xlink:href=['"]?javascript:/i // xlink with javascript
+        /<script\b/i,
+        /on\w+="[^"]*"/i,
+        /on\w+='[^']*'/i,
+        /javascript:/i,
+        /data:text\/html/i,
+        /<[^>]+xlink:href=['"]?javascript:/i,
     ];
-    return patterns.some((pattern) => pattern.test(text));
+    return patterns.some(p => p.test(text));
 }
