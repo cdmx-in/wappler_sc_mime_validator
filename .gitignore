@@ -34,4 +34,3 @@ build/
 
 # Misc
 *.tgz
-package-lock.json
