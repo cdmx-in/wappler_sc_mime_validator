@@ -1,0 +1,20 @@
+{
+  "name": "wappler_sc_mime_validator",
+  "version": "0.0.1",
+  "description": "Wappler Server Connect module for validating MIME types in S3 workflows. Provides actions for secure file uploads, downloads, and validation with custom S3 providers.",
+  "keywords": [
+    "wappler",
+    "server connect",
+    "mime validator",
+    "file upload",
+    "file validation"
+  ],
+  "license": "MIT",
+  "author": {
+    "name": "cdmx1",
+    "url": "https://github.com/cdmx1"
+  },
+  "dependencies": {
+    "mime-types": "^2.1.35"
+  }
+}
