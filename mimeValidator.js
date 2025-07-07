@@ -14,8 +14,8 @@ const { hasMaliciousPDFContent, hasMaliciousSVGContent, isCSVBuffer } = (() => {
         const text = buffer.toString('utf8');
         const patterns = Object.freeze([
             /<script\b/i,
-            /on\w+="[^"]*"/i,
-            /on\w+='[^']*'/i,
+            /\b(on\w+)="[^"]*"/i,
+            /\b(on\w+)='[^']*'/i,
             /javascript:/i,
             /data:text\/html/i,
             /<[^>]+xlink:href=['"]?javascript:/i,

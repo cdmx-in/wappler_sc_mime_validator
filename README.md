@@ -105,4 +105,20 @@ An object containing the following properties:
 - `ERR102`: PDF file contains embedded JavaScript.
 - `ERR103`: SVG file contains embedded JavaScript.
 
+---
+
+## Known Issues (Docker)
+
+**Error:**
+```
+Error: /bin/sh: 1: file: not found
+```
+
+**Solution:**
+Add the following to your Dockerfile to install the required `file` utility:
+
+```
+RUN apt-get update && apt-get install -y file
+```
+
 
