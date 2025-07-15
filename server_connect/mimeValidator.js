@@ -1,8 +1,10 @@
 const { detectBufferMime, detectFilenameMime } = require('mime-detect');
 const { readFile } = require('fs/promises');
+const { createReadStream } = require('fs');
+const { createHash } = require('crypto');
 
 // Create helper functions in a private scope
-const { hasMaliciousPDFContent, hasMaliciousSVGContent, isCSVBuffer } = (() => {
+const { hasMaliciousPDFContent, hasMaliciousSVGContent, isCSVBuffer, getFileSHA256 } = (() => {
     // Private helper functions
     const hasMaliciousPDFContent = Object.freeze(function(buffer) {
         const text = buffer.toString('latin1');
@@ -38,11 +40,26 @@ const { hasMaliciousPDFContent, hasMaliciousSVGContent, isCSVBuffer } = (() => {
         return false;
     });
 
+    const getFileSHA256 = Object.freeze(function (filePath, chunkSize = 1024 * 1024) {
+        return new Promise((resolve, reject) => {
+            try {
+                const hash = createHash('sha256');
+                const stream = createReadStream(filePath, { highWaterMark: chunkSize });
+                stream.on('data', chunk => hash.update(chunk));
+                stream.on('end', () => resolve(hash.digest('hex')));
+                stream.on('error', reject);
+            } catch (error) {
+                reject(error);
+            }
+        });
+    })
+
     // Return frozen object containing the helper functions
     return Object.freeze({
         hasMaliciousPDFContent,
         hasMaliciousSVGContent,
-        isCSVBuffer
+        isCSVBuffer,
+        getFileSHA256
     });
 })();
 
@@ -266,11 +283,15 @@ exports.mime_validator_multiple = async function (options) {
     // Process each file
     for (const file of fileArray) {
         const { name, size, encoding, mimetype, md5, tempFilePath } = file;
+        let sha256 = '';
+        await getFileSHA256(tempFilePath).then(output => {
+            sha256 = output;
+        });
         let fileResult = {
             is_valid: false,
             message: '',
             code: 'ERR101',
-            filesData: [{ name, size, encoding, mimetype, md5 }]
+            fileData: { name, size, encoding, mimetype, md5, sha256 }
         };
 
         // Read buffer asynchronously

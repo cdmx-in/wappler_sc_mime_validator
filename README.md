@@ -69,13 +69,14 @@ An object containing the following properties:
       "is_valid": true,
       "message": "File validation successful",
       "code": 0,
-      "filesData": [
+      "fileData": [
         {
           "name": "file1.pdf",
           "size": 12345,
           "encoding": "7bit",
           "mimetype": "application/pdf",
           "md5": "abc123...",
+          "sha256": "28505cfe...",
           "truncated": false
         }
       ]
@@ -84,13 +85,14 @@ An object containing the following properties:
       "is_valid": false,
       "message": "File type not allowed (content).",
       "code": "ERR101",
-      "filesData": [
+      "fileData": [
         {
           "name": "file2.exe",
           "size": 54321,
           "encoding": "7bit",
           "mimetype": "application/x-msdownload",
           "md5": "def456...",
+          "sha256": "28505cfe...",
           "truncated": false
         }
       ]
