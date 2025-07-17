@@ -96,18 +96,12 @@
       {name: 'code', type: 'text'},
       {
         name: 'filesData', "type": "array",
-        "sub": [
-          {
-            "type": "object",
             "sub": [
               {name: 'is_valid', type: 'boolean'},
               {name: 'message', type: 'text'},
               {name: 'code', type: 'text'},
               {
-                name: 'filesData', "type": "array",
-                "sub": [
-                  {
-                    "type": "object",
+                name: 'fileData', "type": "object",
                     "sub": [
                       {
                         "name": "name",
@@ -135,17 +129,18 @@
                         "type": "text"
                       },
                       {
+                        "name": "sha256",
+                        "title": "sha256",
+                        "type": "text"
+                      },
+                      {
                         "name": "truncated",
                         "title": "truncated",
                         "type": "boolean"
                       }
                     ]
-                  }
-                ]
               }
             ]
-          }
-        ]
       }
     ],
     dataPickObject: true,
