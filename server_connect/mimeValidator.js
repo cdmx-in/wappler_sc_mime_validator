@@ -6,13 +6,13 @@ const { createHash } = require('crypto');
 // Create helper functions in a private scope
 const { hasMaliciousPDFContent, hasMaliciousSVGContent, isCSVBuffer, getFileSHA256 } = (() => {
     // Private helper functions
-    const hasMaliciousPDFContent = Object.freeze(function(buffer) {
+    const hasMaliciousPDFContent = Object.freeze(function (buffer) {
         const text = buffer.toString('latin1');
         const patterns = Object.freeze([/\/JavaScript\b/, /\/JS\b/, /\/AA\b/]);
         return patterns.some(p => p.test(text));
     });
 
-    const hasMaliciousSVGContent = Object.freeze(function(buffer) {
+    const hasMaliciousSVGContent = Object.freeze(function (buffer) {
         const text = buffer.toString('utf8');
         const patterns = Object.freeze([
             /<script\b/i,
@@ -25,20 +25,38 @@ const { hasMaliciousPDFContent, hasMaliciousSVGContent, isCSVBuffer, getFileSHA2
         return patterns.some(p => p.test(text));
     });
 
-    const isCSVBuffer = Object.freeze(function(buffer) {
+    const isCSVBuffer = Object.freeze(function (buffer) {
         const sample = buffer.toString('utf-8', 0, 2048); // read a small portion
         const lines = sample.split(/\r?\n/).filter(Boolean);
 
         if (lines.length >= 2) {
             const [firstLine, secondLine] = lines;
             if (firstLine.includes(',') && secondLine.includes(',')) {
-                const cols1 = firstLine.split(',').length;
-                const cols2 = secondLine.split(',').length;
+                const cols1 = splitCSVLine(firstLine).length;
+                const cols2 = splitCSVLine(secondLine).length;
                 if (cols1 > 1 && cols1 === cols2) return true;
             }
         }
         return false;
     });
+
+    const splitCSVLine = function (line) {
+        const fields = [];
+        let field = '';
+        let inQuotes = false;
+        for (let char of line) {
+            if (char === '"') {
+                inQuotes = !inQuotes;
+            } else if (char === ',' && !inQuotes) {
+                fields.push(field);
+                field = '';
+            } else {
+                field += char;
+            }
+        }
+        fields.push(field);
+        return fields;
+    }
 
     const getFileSHA256 = Object.freeze(function (filePath, chunkSize = 1024 * 1024) {
         return new Promise((resolve, reject) => {
@@ -336,6 +354,10 @@ exports.mime_validator_multiple = async function (options) {
         // Sniff buffer MIME
         const bufferMimeRaw = await detectBufferMime(fileBuffer);
         const baseBuf = bufferMimeRaw.split(';')[0].trim();
+
+        if (extMime === 'text/csv') {
+            accepted.push('application/csv');
+        }
 
         if (!matchesWildcard(baseBuf)) {
             fileResult.message = 'File type not allowed (content).';
