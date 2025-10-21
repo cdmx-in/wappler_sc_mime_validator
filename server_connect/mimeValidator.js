@@ -8,8 +8,17 @@ const { hasMaliciousPDFContent, hasMaliciousSVGContent, isCSVBuffer, getFileSHA2
     // Private helper functions
     const hasMaliciousPDFContent = Object.freeze(function (buffer) {
         const text = buffer.toString('latin1');
-        const patterns = Object.freeze([/\/JavaScript\b/, /\/JS\b/, /\/AA\b/]);
-        return patterns.some(p => p.test(text));
+        const patterns = Object.freeze([
+            /\/JavaScript[\s<]/,   // real JavaScript action
+            /\/JS[\s<]/,           // short form for JavaScript
+            /\/AA[\s<]/            // additional action dictionary
+        ]);
+        return patterns.some(p => {
+            const match = text.match(p);
+            if (!match) return false;
+            const context = text.slice(Math.max(0, match.index - 100), match.index + 100);
+            return /obj|endobj/.test(context);
+        });
     });
 
     const hasMaliciousSVGContent = Object.freeze(function (buffer) {
