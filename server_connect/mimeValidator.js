@@ -136,10 +136,11 @@ exports.mime_validator = async function (options) {
     // 2) fetch file
     const file = this.req.files[inputName];
     if (!file) {
+        // ERR101: The requested upload field does not contain a file.
         return {
             is_valid: false,
-            message: 'File not found.',
-            code: 'ERR101',
+            message: `No file was uploaded in the "${inputName}" field.`,
+            error_code: 'ERR101',
             fileData: null,
         };
     }
@@ -148,8 +149,8 @@ exports.mime_validator = async function (options) {
     const { name, size, encoding, mimetype, md5, tempFilePath } = file;
     let output = {
         is_valid: false,
+        error_code: '',
         message: '',
-        code: 'ERR101',
         fileData: { name, size, encoding, mimetype, md5 },
     };
 
@@ -158,7 +159,9 @@ exports.mime_validator = async function (options) {
     try {
         fileBuffer = await readFile(tempFilePath);
     } catch (err) {
-        output.message = 'Unable to read file.';
+        // ERR102: The uploaded file exists, but its temporary file cannot be read.
+        output.error_code = 'ERR102';
+        output.message = `Unable to read the uploaded file "${name}".`;
         return output;
     }
 
@@ -181,7 +184,9 @@ exports.mime_validator = async function (options) {
 
     // 7) early reject based on extension check
     if (!matchesWildcard(baseExt)) {
-        output.message = 'File type not allowed (extension).';
+        // ERR103: The filename extension resolves to a MIME type outside the accept list.
+        output.error_code = 'ERR103';
+        output.message = `File type "${baseExt}" is not allowed by the accepted MIME types.`;
         return output;
     }
 
@@ -195,8 +200,20 @@ exports.mime_validator = async function (options) {
     const bufferMimeRaw = await detectBufferMime(fileBuffer);
     const baseBuf = bufferMimeRaw.split(';')[0].trim();
 
+    // Scale-friendly dynamic text exclusion replacing the hardcoded CSV/CSS clause
+    const isMimeMismatch = (isTextPlain(baseExt) && isTextPlain(baseBuf)) ? false : baseBuf !== baseExt;
+
+    if (isMimeMismatch) {
+        // ERR104: The file content MIME type does not match the MIME type inferred from its name.
+        output.error_code = 'ERR104';
+        output.message = `File content is detected as "${baseBuf}", but the filename indicates "${baseExt}".`;
+        return output;
+    }
+
     if (!matchesWildcard(baseBuf)) {
-        output.message = 'File type not allowed (content).';
+        // ERR105: The detected content MIME type is outside the accept list.
+        output.error_code = 'ERR105';
+        output.message = `Detected file type "${baseBuf}" is not allowed by the accepted MIME types.`;
         return output;
     }
 
@@ -208,10 +225,11 @@ exports.mime_validator = async function (options) {
     // 10) deep script scans
 
     if (baseExt === 'text/csv' && !isCSVBuffer(fileBuffer)) {
+        // ERR106: The file has a CSV extension, but its contents do not have a valid CSV structure.
         return {
             ...output,
-            code: 'ERR101',
-            message: 'File type not allowed (content).',
+            error_code: 'ERR106',
+            message: 'The file has a CSV extension, but its content is not valid CSV data.',
         };
 
     }
@@ -221,9 +239,10 @@ exports.mime_validator = async function (options) {
         baseBuf === 'application/pdf' &&
         hasMaliciousPDFContent(fileBuffer)
     ) {
+        // ERR107: PDF script scanning found an embedded JavaScript action.
         return {
             ...output,
-            code: 'ERR102',
+            error_code: 'ERR107',
             message: 'Embedded JavaScript detected in PDF.',
         };
     }
@@ -233,9 +252,10 @@ exports.mime_validator = async function (options) {
         baseBuf === 'image/svg+xml' &&
         hasMaliciousSVGContent(fileBuffer)
     ) {
+        // ERR108: SVG script scanning found markup or a URL that may execute script.
         return {
             ...output,
-            code: 'ERR103',
+            error_code: 'ERR108',
             message: 'Potential XSS risk: Dangerous SVG content.',
         };
     }
@@ -244,8 +264,9 @@ exports.mime_validator = async function (options) {
     return {
         ...output,
         is_valid: true,
-        code: 0,
+        error_code: 0,
         // if you want to return the MIME you actually used, include finalMime here:
+        // finalMime is define above but not used, if you want to return it, uncomment the line below
         // detectedMime: finalMime
     };
 };
@@ -295,10 +316,11 @@ exports.mime_validator_multiple = async function (options) {
     // 2) fetch files
     const files = this.req.files[inputName];
     if (!files) {
+        // ERR101: The requested upload field does not contain any files.
         return {
             is_valid: false,
-            message: 'Files not found.',
-            code: 'ERR101',
+            error_code: 'ERR101',
+            message: `No files were uploaded in the "${inputName}" field.`,
             filesData: null,
         };
     }
@@ -317,7 +339,7 @@ exports.mime_validator_multiple = async function (options) {
         let fileResult = {
             is_valid: false,
             message: '',
-            code: 'ERR101',
+            error_code: '',
             fileData: { name, size, encoding, mimetype, md5, sha256 }
         };
 
@@ -326,7 +348,9 @@ exports.mime_validator_multiple = async function (options) {
         try {
             fileBuffer = await readFile(tempFilePath);
         } catch (err) {
-            fileResult.message = 'Unable to read file.';
+            // ERR102: The uploaded file exists, but its temporary file cannot be read.
+            fileResult.error_code = 'ERR102';
+            fileResult.message = `Unable to read the uploaded file "${name}".`;
             results.push(fileResult);
             continue;
         }
@@ -335,7 +359,7 @@ exports.mime_validator_multiple = async function (options) {
         const extMime = detectFilenameMime(name);
         const baseExt = extMime.split(';')[0].trim();
 
-        // Prepare accept-list and wildcard matcher
+        // Prepare accept-list and wildcard matcher inside the loop to avoid leakage mutations
         const accepted = acceptsStr.split(',').map(s => s.trim());
         const matchesWildcard = mime =>
             accepted.some(a => {
@@ -350,7 +374,9 @@ exports.mime_validator_multiple = async function (options) {
 
         // Early reject based on extension check
         if (!matchesWildcard(baseExt)) {
-            fileResult.message = 'File type not allowed (extension).';
+            // ERR103: The filename extension resolves to a MIME type outside the accept list.
+            fileResult.error_code = 'ERR103';
+            fileResult.message = `File type "${baseExt}" is not allowed by the accepted MIME types.`;
             results.push(fileResult);
             continue;
         }
@@ -364,43 +390,55 @@ exports.mime_validator_multiple = async function (options) {
         const bufferMimeRaw = await detectBufferMime(fileBuffer);
         const baseBuf = bufferMimeRaw.split(';')[0].trim();
 
-        if (extMime === 'text/csv') {
-            accepted.push('application/csv');
+        // Scalable dynamic check for plain text variants replacing the previous legacy push blocks
+        const isMimeMismatch = (mimeTypesThatAppearAsTextPlain.some(m => m === baseExt) && mimeTypesThatAppearAsTextPlain.some(m => m === baseBuf)) ? false : baseBuf !== baseExt;
+
+        if (isMimeMismatch) {
+            // ERR104: The file content MIME type does not match the MIME type inferred from its name.
+            fileResult.error_code = 'ERR104';
+            fileResult.message = `File content is detected as "${baseBuf}", but the filename indicates "${baseExt}".`;
+            results.push(fileResult);
+            continue;
         }
 
         if (!matchesWildcard(baseBuf)) {
-            fileResult.message = 'File type not allowed (content).';
+            // ERR105: The detected content MIME type is outside the accept list.
+            fileResult.error_code = 'ERR105';
+            fileResult.message = `Detected file type "${baseBuf}" is not allowed by the accepted MIME types.`;
             results.push(fileResult);
             continue;
         }
 
         // Check for CSV content
         if (baseExt === 'text/csv' && !isCSVBuffer(fileBuffer)) {
-            fileResult.message = 'File type not allowed (content).';
-            fileResult.code = 'ERR101';
+            // ERR106: The file has a CSV extension, but its contents do not have a valid CSV structure.
+            fileResult.error_code = 'ERR106';
+            fileResult.message = 'The file has a CSV extension, but its content is not valid CSV data.';
             results.push(fileResult);
             continue;
         }
 
         // Check for malicious PDF content
         if (detectPdfScripts && baseBuf === 'application/pdf' && hasMaliciousPDFContent(fileBuffer)) {
+            // ERR107: PDF script scanning found an embedded JavaScript action.
+            fileResult.error_code = 'ERR107';
             fileResult.message = 'Embedded JavaScript detected in PDF.';
-            fileResult.code = 'ERR102';
             results.push(fileResult);
             continue;
         }
 
         // Check for malicious SVG content
         if (detectSvgScripts && baseBuf === 'image/svg+xml' && hasMaliciousSVGContent(fileBuffer)) {
+            // ERR108: SVG script scanning found markup or a URL that may execute script.
+            fileResult.error_code = 'ERR108';
             fileResult.message = 'Potential XSS risk: Dangerous SVG content.';
-            fileResult.code = 'ERR103';
             results.push(fileResult);
             continue;
         }
 
         // All checks passed for this file
         fileResult.is_valid = true;
-        fileResult.code = 0;
+        fileResult.error_code = 0;
         results.push(fileResult);
     }
 
@@ -408,7 +446,7 @@ exports.mime_validator_multiple = async function (options) {
     return {
         is_valid: results.every(r => r.is_valid),
         message: results.some(r => !r.is_valid) ? 'Some files failed validation' : 'All files validated successfully',
-        code: results.some(r => !r.is_valid) ? 'ERR101' : 0,
+        error_code: results.some(r => !r.is_valid) ? 'ERR109' : 0,
         filesData: results
     };
 };
