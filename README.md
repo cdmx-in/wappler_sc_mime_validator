@@ -84,7 +84,7 @@ An object containing the following properties:
     {
       "is_valid": false,
       "message": "File type not allowed (content).",
-      "code": "ERR101",
+      "code": "ERR105",
       "fileData": [
         {
           "name": "file2.exe",
@@ -103,9 +103,16 @@ An object containing the following properties:
 
 ### Error Codes
 
-- `ERR101`: File type not allowed or file missing.
-- `ERR102`: PDF file contains embedded JavaScript.
-- `ERR103`: SVG file contains embedded JavaScript.
+- `ERR101`: File not found.
+- `ERR102`: Unable to read the file.
+- `ERR103`: The file extension is not supported.
+- `ERR104`: The file content doesn't match its extension.
+- `ERR105`: The uploaded file content is not supported.
+- `ERR106`: The uploaded CSV file is invalid.
+- `ERR107`: The PDF contains restricted content.
+- `ERR108`: The SVG contains restricted content.
+
+
 
 ---
 
