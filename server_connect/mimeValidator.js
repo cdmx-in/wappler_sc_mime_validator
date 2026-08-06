@@ -90,6 +90,32 @@ const { hasMaliciousPDFContent, hasMaliciousSVGContent, isCSVBuffer, getFileSHA2
     });
 })();
 
+// MIME types whose content commonly sniffs as text/plain (or as one another),
+// treated as interchangeable when comparing extension MIME vs. content MIME.
+const mimeTypesThatAppearAsTextPlain = Object.freeze([
+    'text/plain',
+    'text/csv',
+    'application/csv', // some `file` versions report CSV content as this
+    'text/tab-separated-values',
+    'application/json',
+    'application/xml',
+    'text/xml', // `file` reports XML/extension-less SVG content as this
+    'text/html',
+    'text/markdown',
+    'text/yaml',
+    'application/javascript',
+    'text/javascript',
+    'application/typescript',
+    'text/css',
+    'text/x-python',
+    'text/x-java-source',
+    'text/x-csrc',
+    'text/x-c++src',
+    'text/x-ruby',
+    'application/sql',
+]);
+const isTextPlain = mime => mimeTypesThatAppearAsTextPlain.includes(mime);
+
 exports.mime_validator = async function (options) {
     // 1) parse inputs
     const acceptsStr = this.parseRequired(
@@ -112,27 +138,6 @@ exports.mime_validator = async function (options) {
         'boolean',
         true
     );
-    const mimeTypesThatAppearAsTextPlain = [
-        'text/plain',
-        'text/csv',
-        'text/tab-separated-values',
-        'application/json',
-        'application/xml',
-        'text/html',
-        'text/markdown',
-        'text/yaml',
-        'application/javascript',
-        'application/typescript',
-        'text/css',
-        'text/x-python',
-        'text/x-java-source',
-        'text/x-csrc',
-        'text/x-c++src',
-        'text/x-ruby',
-        'application/sql',
-    ];
-
-
     // 2) fetch file
     const file = this.req.files[inputName];
     if (!file) {
@@ -190,18 +195,17 @@ exports.mime_validator = async function (options) {
         return output;
     }
 
-    const isTextPlain = mime =>
-        mimeTypesThatAppearAsTextPlain.some(m => m === mime);
-
     if (isTextPlain(baseExt)) {
+        // Text-alike content commonly sniffs as text/plain; CSV also as application/csv
         accepted.push('text/plain');
+        if (baseExt === 'text/csv') accepted.push('application/csv');
     }
     // 8) sniff buffer MIME (may include “; charset=…”)
     const bufferMimeRaw = await detectBufferMime(fileBuffer);
     const baseBuf = bufferMimeRaw.split(';')[0].trim();
 
-    // Scale-friendly dynamic text exclusion replacing the hardcoded CSV/CSS clause
-    const isMimeMismatch = (isTextPlain(baseExt) && isTextPlain(baseBuf)) ? false : baseBuf !== baseExt;
+    // Content and extension MIME must agree, except among text-plain-alike types
+    const isMimeMismatch = baseBuf !== baseExt && !(isTextPlain(baseExt) && isTextPlain(baseBuf));
 
     if (isMimeMismatch) {
         // ERR104: The file content MIME type does not match the MIME type inferred from its name.
@@ -260,14 +264,11 @@ exports.mime_validator = async function (options) {
         };
     }
 
-    // 11) all checks passed
+    // 11) all checks passed — error_code is always a string, empty when valid
     return {
         ...output,
         is_valid: true,
-        error_code: 0,
-        // if you want to return the MIME you actually used, include finalMime here:
-        // finalMime is define above but not used, if you want to return it, uncomment the line below
-        // detectedMime: finalMime
+        error_code: '',
     };
 };
 
@@ -293,26 +294,6 @@ exports.mime_validator_multiple = async function (options) {
         'boolean',
         true
     );
-    const mimeTypesThatAppearAsTextPlain = [
-        'text/plain',
-        'text/csv',
-        'text/tab-separated-values',
-        'application/json',
-        'application/xml',
-        'text/html',
-        'text/markdown',
-        'text/yaml',
-        'application/javascript',
-        'application/typescript',
-        'text/css',
-        'text/x-python',
-        'text/x-java-source',
-        'text/x-csrc',
-        'text/x-c++src',
-        'text/x-ruby',
-        'application/sql',
-    ];
-
     // 2) fetch files
     const files = this.req.files[inputName];
     if (!files) {
@@ -332,10 +313,8 @@ exports.mime_validator_multiple = async function (options) {
     // Process each file
     for (const file of fileArray) {
         const { name, size, encoding, mimetype, md5, tempFilePath } = file;
-        let sha256 = '';
-        await getFileSHA256(tempFilePath).then(output => {
-            sha256 = output;
-        });
+        // Empty on failure — the readFile below reports the ERR102 for unreadable files
+        const sha256 = await getFileSHA256(tempFilePath).catch(() => '');
         let fileResult = {
             is_valid: false,
             message: '',
@@ -381,17 +360,18 @@ exports.mime_validator_multiple = async function (options) {
             continue;
         }
 
-        // Handle text/plain types
-        if (mimeTypesThatAppearAsTextPlain.some(m => m === baseExt)) {
+        // Text-alike content commonly sniffs as text/plain; CSV also as application/csv
+        if (isTextPlain(baseExt)) {
             accepted.push('text/plain');
+            if (baseExt === 'text/csv') accepted.push('application/csv');
         }
 
         // Sniff buffer MIME
         const bufferMimeRaw = await detectBufferMime(fileBuffer);
         const baseBuf = bufferMimeRaw.split(';')[0].trim();
 
-        // Scalable dynamic check for plain text variants replacing the previous legacy push blocks
-        const isMimeMismatch = (mimeTypesThatAppearAsTextPlain.some(m => m === baseExt) && mimeTypesThatAppearAsTextPlain.some(m => m === baseBuf)) ? false : baseBuf !== baseExt;
+        // Content and extension MIME must agree, except among text-plain-alike types
+        const isMimeMismatch = baseBuf !== baseExt && !(isTextPlain(baseExt) && isTextPlain(baseBuf));
 
         if (isMimeMismatch) {
             // ERR104: The file content MIME type does not match the MIME type inferred from its name.
@@ -436,17 +416,19 @@ exports.mime_validator_multiple = async function (options) {
             continue;
         }
 
-        // All checks passed for this file
+        // All checks passed for this file — error_code is always a string, empty when valid
         fileResult.is_valid = true;
-        fileResult.error_code = 0;
+        fileResult.error_code = '';
         results.push(fileResult);
     }
 
     // Return overall results
+    const allValid = results.every(r => r.is_valid);
     return {
-        is_valid: results.every(r => r.is_valid),
-        message: results.some(r => !r.is_valid) ? 'Some files failed validation' : 'All files validated successfully',
-        error_code: results.some(r => !r.is_valid) ? 'ERR109' : 0,
+        is_valid: allValid,
+        message: allValid ? 'All files validated successfully' : 'Some files failed validation',
+        // ERR109: One or more files in the batch failed validation.
+        error_code: allValid ? '' : 'ERR109',
         filesData: results
     };
 };

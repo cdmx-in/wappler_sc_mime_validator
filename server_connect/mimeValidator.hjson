@@ -50,7 +50,7 @@
             }
           ]
       },
-      {name: 'code', type: 'text'}
+      {name: 'error_code', type: 'text'}
     ],
     dataPickObject: true,
     "properties": [
@@ -93,13 +93,13 @@
     dataScheme: [
       {name: 'is_valid', type: 'boolean'},
       {name: 'message', type: 'text'},
-      {name: 'code', type: 'text'},
+      {name: 'error_code', type: 'text'},
       {
         name: 'filesData', "type": "array",
             "sub": [
               {name: 'is_valid', type: 'boolean'},
               {name: 'message', type: 'text'},
-              {name: 'code', type: 'text'},
+              {name: 'error_code', type: 'text'},
               {
                 name: 'fileData', "type": "object",
                     "sub": [
