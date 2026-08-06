@@ -37,6 +37,13 @@ const FIXTURES = {
     ]),
     'tool.exe': Buffer.from('MZ\x90\x00binary stub'),
     'fake.pdf': Buffer.from([0x00, 0x01, 0x02, 0x03, 0xff, 0xfe, 0xfd]), // binary junk with a .pdf name
+    'junk.docx': Buffer.from([0x00, 0x01, 0x02, 0x03, 0xff, 0xfe, 0xfd]), // binary junk with a .docx name
+    // Empty ZIP (end-of-central-directory record only) — sniffs as application/zip,
+    // like OOXML/ODF files on `file` versions that don't recognize the subtype
+    'report.docx': Buffer.concat([Buffer.from('PK\x05\x06'), Buffer.alloc(18)]),
+    // OLE compound document magic — sniffs as application/CDFV2 or x-ole-storage
+    'legacy.xls': Buffer.concat([Buffer.from([0xd0, 0xcf, 0x11, 0xe0, 0xa1, 0xb1, 0x1a, 0xe1]), Buffer.alloc(504)]),
+    'notes.txt': 'name,age,city\nalice,30,nyc\nbob,25,sf\n', // CSV-looking content in a .txt is fine
 };
 
 let dir;
@@ -121,6 +128,14 @@ describe('mime_validator (single)', () => {
         assert.equal(res.error_code, '');
     });
 
+    test('ERR104 for binary junk named .docx (ZIP-group equivalence does not cover it)', async () => {
+        const res = await run(await upload('junk.docx', fx('junk.docx')), {
+            accepts: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+        });
+        assert.equal(res.is_valid, false);
+        assert.equal(res.error_code, 'ERR104');
+    });
+
     for (const [file, accepts] of [
         ['valid.csv', 'text/csv'],
         ['quoted.csv', 'text/csv'],
@@ -128,6 +143,12 @@ describe('mime_validator (single)', () => {
         ['clean.svg', 'image/svg+xml'],
         ['pixel.png', 'image/*'],
         ['pixel.png', '*/*'],
+        // sniffed as application/zip — accepted because .docx is a ZIP container format
+        ['report.docx', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'],
+        // sniffed as application/CDFV2 — accepted because .xls is an OLE compound document
+        ['legacy.xls', 'application/vnd.ms-excel'],
+        // sniffed as text/csv — accepted because CSV is a harmless text-group sniff
+        ['notes.txt', 'text/plain'],
     ]) {
         test(`valid: ${file} with accepts "${accepts}"`, async () => {
             const res = await run(await upload(file, fx(file)), { accepts });

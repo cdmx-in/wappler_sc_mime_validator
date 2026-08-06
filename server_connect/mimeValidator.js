@@ -90,31 +90,66 @@ const { hasMaliciousPDFContent, hasMaliciousSVGContent, isCSVBuffer, getFileSHA2
     });
 })();
 
-// MIME types whose content commonly sniffs as text/plain (or as one another),
-// treated as interchangeable when comparing extension MIME vs. content MIME.
-const mimeTypesThatAppearAsTextPlain = Object.freeze([
-    'text/plain',
-    'text/csv',
-    'application/csv', // some `file` versions report CSV content as this
-    'text/tab-separated-values',
-    'application/json',
-    'application/xml',
-    'text/xml', // `file` reports XML/extension-less SVG content as this
-    'text/html',
-    'text/markdown',
-    'text/yaml',
-    'application/javascript',
-    'text/javascript',
-    'application/typescript',
-    'text/css',
-    'text/x-python',
-    'text/x-java-source',
-    'text/x-csrc',
-    'text/x-c++src',
-    'text/x-ruby',
-    'application/sql',
+// Content sniffing cannot reliably tell the formats within a group apart, so an
+// extension/content mismatch between two members of the same group is not an
+// error. `generic` lists the MIMEs the sniffer typically reports for the group's
+// content that are harmless to auto-accept when the extension belongs to the
+// group; risky sniff results (text/html, text/xml, image/svg+xml) stay in
+// `members` so they must be explicitly accepted.
+const mimeEquivalenceGroups = Object.freeze([
+    {
+        // Text formats — commonly sniffed as text/plain, CSV/JSON as their own types
+        generic: ['text/plain', 'text/csv', 'application/csv', 'application/json'],
+        members: [
+            'text/tab-separated-values',
+            'application/xml',
+            'text/xml',
+            'text/html',
+            'text/markdown',
+            'text/yaml',
+            'image/svg+xml',
+            'application/javascript',
+            'text/javascript',
+            'application/typescript',
+            'text/css',
+            'text/x-python',
+            'text/x-java-source',
+            'text/x-csrc',
+            'text/x-c++src',
+            'text/x-ruby',
+            'application/sql',
+        ],
+    },
+    {
+        // ZIP containers — sniffed as application/zip when the subtype is not recognized
+        generic: ['application/zip'],
+        members: [
+            'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+            'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+            'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+            'application/vnd.oasis.opendocument.text',
+            'application/vnd.oasis.opendocument.spreadsheet',
+            'application/vnd.oasis.opendocument.presentation',
+            'application/epub+zip',
+            'application/java-archive',
+        ],
+    },
+    {
+        // Legacy OLE compound documents (doc/xls/ppt/msi)
+        generic: ['application/x-ole-storage', 'application/CDFV2', 'application/vnd.ms-office'],
+        members: [
+            'application/msword',
+            'application/vnd.ms-excel',
+            'application/vnd.ms-powerpoint',
+            'application/vnd.visio',
+            'application/x-msi',
+        ],
+    },
 ]);
-const isTextPlain = mime => mimeTypesThatAppearAsTextPlain.includes(mime);
+const mimeGroupOf = mime =>
+    mimeEquivalenceGroups.find(g => g.generic.includes(mime) || g.members.includes(mime));
+const areMimesEquivalent = (a, b) =>
+    a === b || (mimeGroupOf(a) !== undefined && mimeGroupOf(a) === mimeGroupOf(b));
 
 exports.mime_validator = async function (options) {
     // 1) parse inputs
@@ -195,17 +230,16 @@ exports.mime_validator = async function (options) {
         return output;
     }
 
-    if (isTextPlain(baseExt)) {
-        // Text-alike content commonly sniffs as text/plain; CSV also as application/csv
-        accepted.push('text/plain');
-        if (baseExt === 'text/csv') accepted.push('application/csv');
-    }
+    // Auto-accept the generic MIMEs the sniffer reports for this extension's group
+    const extGroup = mimeGroupOf(baseExt);
+    if (extGroup) accepted.push(...extGroup.generic);
+
     // 8) sniff buffer MIME (may include “; charset=…”)
     const bufferMimeRaw = await detectBufferMime(fileBuffer);
     const baseBuf = bufferMimeRaw.split(';')[0].trim();
 
-    // Content and extension MIME must agree, except among text-plain-alike types
-    const isMimeMismatch = baseBuf !== baseExt && !(isTextPlain(baseExt) && isTextPlain(baseBuf));
+    // Content and extension MIME must agree, unless sniffing can't tell them apart (same group)
+    const isMimeMismatch = !areMimesEquivalent(baseBuf, baseExt);
 
     if (isMimeMismatch) {
         // ERR104: The file content MIME type does not match the MIME type inferred from its name.
@@ -360,18 +394,16 @@ exports.mime_validator_multiple = async function (options) {
             continue;
         }
 
-        // Text-alike content commonly sniffs as text/plain; CSV also as application/csv
-        if (isTextPlain(baseExt)) {
-            accepted.push('text/plain');
-            if (baseExt === 'text/csv') accepted.push('application/csv');
-        }
+        // Auto-accept the generic MIMEs the sniffer reports for this extension's group
+        const extGroup = mimeGroupOf(baseExt);
+        if (extGroup) accepted.push(...extGroup.generic);
 
         // Sniff buffer MIME
         const bufferMimeRaw = await detectBufferMime(fileBuffer);
         const baseBuf = bufferMimeRaw.split(';')[0].trim();
 
-        // Content and extension MIME must agree, except among text-plain-alike types
-        const isMimeMismatch = baseBuf !== baseExt && !(isTextPlain(baseExt) && isTextPlain(baseBuf));
+        // Content and extension MIME must agree, unless sniffing can't tell them apart (same group)
+        const isMimeMismatch = !areMimesEquivalent(baseBuf, baseExt);
 
         if (isMimeMismatch) {
             // ERR104: The file content MIME type does not match the MIME type inferred from its name.

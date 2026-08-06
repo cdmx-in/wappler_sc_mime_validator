@@ -102,7 +102,7 @@ An object containing the following properties:
 - `ERR101`: No file was uploaded in the given input field.
 - `ERR102`: Unable to read the uploaded file.
 - `ERR103`: The file extension resolves to a MIME type outside the accepted list.
-- `ERR104`: The file content does not match its extension.
+- `ERR104`: The file content does not match its extension. Mismatches are tolerated within format families that content sniffing cannot tell apart: plain-text formats (sniffed as `text/plain`), ZIP-based documents such as docx/xlsx/pptx/odt/epub (sniffed as `application/zip`), and legacy Office documents such as doc/xls/ppt (sniffed as `application/x-ole-storage`/`CDFV2`).
 - `ERR105`: The detected file content MIME type is outside the accepted list.
 - `ERR106`: The file has a CSV extension, but its content is not valid CSV data.
 - `ERR107`: The PDF contains embedded JavaScript.
