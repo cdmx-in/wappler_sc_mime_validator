@@ -90,6 +90,67 @@ const { hasMaliciousPDFContent, hasMaliciousSVGContent, isCSVBuffer, getFileSHA2
     });
 })();
 
+// Content sniffing cannot reliably tell the formats within a group apart, so an
+// extension/content mismatch between two members of the same group is not an
+// error. `generic` lists the MIMEs the sniffer typically reports for the group's
+// content that are harmless to auto-accept when the extension belongs to the
+// group; risky sniff results (text/html, text/xml, image/svg+xml) stay in
+// `members` so they must be explicitly accepted.
+const mimeEquivalenceGroups = Object.freeze([
+    {
+        // Text formats — commonly sniffed as text/plain, CSV/JSON as their own types
+        generic: ['text/plain', 'text/csv', 'application/csv', 'application/json'],
+        members: [
+            'text/tab-separated-values',
+            'application/xml',
+            'text/xml',
+            'text/html',
+            'text/markdown',
+            'text/yaml',
+            'image/svg+xml',
+            'application/javascript',
+            'text/javascript',
+            'application/typescript',
+            'text/css',
+            'text/x-python',
+            'text/x-java-source',
+            'text/x-csrc',
+            'text/x-c++src',
+            'text/x-ruby',
+            'application/sql',
+        ],
+    },
+    {
+        // ZIP containers — sniffed as application/zip when the subtype is not recognized
+        generic: ['application/zip'],
+        members: [
+            'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+            'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+            'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+            'application/vnd.oasis.opendocument.text',
+            'application/vnd.oasis.opendocument.spreadsheet',
+            'application/vnd.oasis.opendocument.presentation',
+            'application/epub+zip',
+            'application/java-archive',
+        ],
+    },
+    {
+        // Legacy OLE compound documents (doc/xls/ppt/msi)
+        generic: ['application/x-ole-storage', 'application/CDFV2', 'application/vnd.ms-office'],
+        members: [
+            'application/msword',
+            'application/vnd.ms-excel',
+            'application/vnd.ms-powerpoint',
+            'application/vnd.visio',
+            'application/x-msi',
+        ],
+    },
+]);
+const mimeGroupOf = mime =>
+    mimeEquivalenceGroups.find(g => g.generic.includes(mime) || g.members.includes(mime));
+const areMimesEquivalent = (a, b) =>
+    a === b || (mimeGroupOf(a) !== undefined && mimeGroupOf(a) === mimeGroupOf(b));
+
 exports.mime_validator = async function (options) {
     // 1) parse inputs
     const acceptsStr = this.parseRequired(
@@ -112,34 +173,14 @@ exports.mime_validator = async function (options) {
         'boolean',
         true
     );
-    const mimeTypesThatAppearAsTextPlain = [
-        'text/plain',
-        'text/csv',
-        'text/tab-separated-values',
-        'application/json',
-        'application/xml',
-        'text/html',
-        'text/markdown',
-        'text/yaml',
-        'application/javascript',
-        'application/typescript',
-        'text/css',
-        'text/x-python',
-        'text/x-java-source',
-        'text/x-csrc',
-        'text/x-c++src',
-        'text/x-ruby',
-        'application/sql',
-    ];
-
-
     // 2) fetch file
     const file = this.req.files[inputName];
     if (!file) {
+        // ERR101: The requested upload field does not contain a file.
         return {
             is_valid: false,
-            message: 'File not found.',
-            code: 'ERR101',
+            message: `No file was uploaded in the "${inputName}" field.`,
+            error_code: 'ERR101',
             fileData: null,
         };
     }
@@ -148,8 +189,8 @@ exports.mime_validator = async function (options) {
     const { name, size, encoding, mimetype, md5, tempFilePath } = file;
     let output = {
         is_valid: false,
+        error_code: '',
         message: '',
-        code: 'ERR101',
         fileData: { name, size, encoding, mimetype, md5 },
     };
 
@@ -158,7 +199,9 @@ exports.mime_validator = async function (options) {
     try {
         fileBuffer = await readFile(tempFilePath);
     } catch (err) {
-        output.message = 'Unable to read file.';
+        // ERR102: The uploaded file exists, but its temporary file cannot be read.
+        output.error_code = 'ERR102';
+        output.message = `Unable to read the uploaded file "${name}".`;
         return output;
     }
 
@@ -181,22 +224,34 @@ exports.mime_validator = async function (options) {
 
     // 7) early reject based on extension check
     if (!matchesWildcard(baseExt)) {
-        output.message = 'File type not allowed (extension).';
+        // ERR103: The filename extension resolves to a MIME type outside the accept list.
+        output.error_code = 'ERR103';
+        output.message = `File type "${baseExt}" is not allowed by the accepted MIME types.`;
         return output;
     }
 
-    const isTextPlain = mime =>
-        mimeTypesThatAppearAsTextPlain.some(m => m === mime);
+    // Auto-accept the generic MIMEs the sniffer reports for this extension's group
+    const extGroup = mimeGroupOf(baseExt);
+    if (extGroup) accepted.push(...extGroup.generic);
 
-    if (isTextPlain(baseExt)) {
-        accepted.push('text/plain');
-    }
     // 8) sniff buffer MIME (may include “; charset=…”)
     const bufferMimeRaw = await detectBufferMime(fileBuffer);
     const baseBuf = bufferMimeRaw.split(';')[0].trim();
 
+    // Content and extension MIME must agree, unless sniffing can't tell them apart (same group)
+    const isMimeMismatch = !areMimesEquivalent(baseBuf, baseExt);
+
+    if (isMimeMismatch) {
+        // ERR104: The file content MIME type does not match the MIME type inferred from its name.
+        output.error_code = 'ERR104';
+        output.message = `File content is detected as "${baseBuf}", but the filename indicates "${baseExt}".`;
+        return output;
+    }
+
     if (!matchesWildcard(baseBuf)) {
-        output.message = 'File type not allowed (content).';
+        // ERR105: The detected content MIME type is outside the accept list.
+        output.error_code = 'ERR105';
+        output.message = `Detected file type "${baseBuf}" is not allowed by the accepted MIME types.`;
         return output;
     }
 
@@ -208,10 +263,11 @@ exports.mime_validator = async function (options) {
     // 10) deep script scans
 
     if (baseExt === 'text/csv' && !isCSVBuffer(fileBuffer)) {
+        // ERR106: The file has a CSV extension, but its contents do not have a valid CSV structure.
         return {
             ...output,
-            code: 'ERR101',
-            message: 'File type not allowed (content).',
+            error_code: 'ERR106',
+            message: 'The file has a CSV extension, but its content is not valid CSV data.',
         };
 
     }
@@ -221,9 +277,10 @@ exports.mime_validator = async function (options) {
         baseBuf === 'application/pdf' &&
         hasMaliciousPDFContent(fileBuffer)
     ) {
+        // ERR107: PDF script scanning found an embedded JavaScript action.
         return {
             ...output,
-            code: 'ERR102',
+            error_code: 'ERR107',
             message: 'Embedded JavaScript detected in PDF.',
         };
     }
@@ -233,20 +290,19 @@ exports.mime_validator = async function (options) {
         baseBuf === 'image/svg+xml' &&
         hasMaliciousSVGContent(fileBuffer)
     ) {
+        // ERR108: SVG script scanning found markup or a URL that may execute script.
         return {
             ...output,
-            code: 'ERR103',
+            error_code: 'ERR108',
             message: 'Potential XSS risk: Dangerous SVG content.',
         };
     }
 
-    // 11) all checks passed
+    // 11) all checks passed — error_code is always a string, empty when valid
     return {
         ...output,
         is_valid: true,
-        code: 0,
-        // if you want to return the MIME you actually used, include finalMime here:
-        // detectedMime: finalMime
+        error_code: '',
     };
 };
 
@@ -272,33 +328,14 @@ exports.mime_validator_multiple = async function (options) {
         'boolean',
         true
     );
-    const mimeTypesThatAppearAsTextPlain = [
-        'text/plain',
-        'text/csv',
-        'text/tab-separated-values',
-        'application/json',
-        'application/xml',
-        'text/html',
-        'text/markdown',
-        'text/yaml',
-        'application/javascript',
-        'application/typescript',
-        'text/css',
-        'text/x-python',
-        'text/x-java-source',
-        'text/x-csrc',
-        'text/x-c++src',
-        'text/x-ruby',
-        'application/sql',
-    ];
-
     // 2) fetch files
     const files = this.req.files[inputName];
     if (!files) {
+        // ERR101: The requested upload field does not contain any files.
         return {
             is_valid: false,
-            message: 'Files not found.',
-            code: 'ERR101',
+            error_code: 'ERR101',
+            message: `No files were uploaded in the "${inputName}" field.`,
             filesData: null,
         };
     }
@@ -310,14 +347,12 @@ exports.mime_validator_multiple = async function (options) {
     // Process each file
     for (const file of fileArray) {
         const { name, size, encoding, mimetype, md5, tempFilePath } = file;
-        let sha256 = '';
-        await getFileSHA256(tempFilePath).then(output => {
-            sha256 = output;
-        });
+        // Empty on failure — the readFile below reports the ERR102 for unreadable files
+        const sha256 = await getFileSHA256(tempFilePath).catch(() => '');
         let fileResult = {
             is_valid: false,
             message: '',
-            code: 'ERR101',
+            error_code: '',
             fileData: { name, size, encoding, mimetype, md5, sha256 }
         };
 
@@ -326,7 +361,9 @@ exports.mime_validator_multiple = async function (options) {
         try {
             fileBuffer = await readFile(tempFilePath);
         } catch (err) {
-            fileResult.message = 'Unable to read file.';
+            // ERR102: The uploaded file exists, but its temporary file cannot be read.
+            fileResult.error_code = 'ERR102';
+            fileResult.message = `Unable to read the uploaded file "${name}".`;
             results.push(fileResult);
             continue;
         }
@@ -335,7 +372,7 @@ exports.mime_validator_multiple = async function (options) {
         const extMime = detectFilenameMime(name);
         const baseExt = extMime.split(';')[0].trim();
 
-        // Prepare accept-list and wildcard matcher
+        // Prepare accept-list and wildcard matcher inside the loop to avoid leakage mutations
         const accepted = acceptsStr.split(',').map(s => s.trim());
         const matchesWildcard = mime =>
             accepted.some(a => {
@@ -350,65 +387,80 @@ exports.mime_validator_multiple = async function (options) {
 
         // Early reject based on extension check
         if (!matchesWildcard(baseExt)) {
-            fileResult.message = 'File type not allowed (extension).';
+            // ERR103: The filename extension resolves to a MIME type outside the accept list.
+            fileResult.error_code = 'ERR103';
+            fileResult.message = `File type "${baseExt}" is not allowed by the accepted MIME types.`;
             results.push(fileResult);
             continue;
         }
 
-        // Handle text/plain types
-        if (mimeTypesThatAppearAsTextPlain.some(m => m === baseExt)) {
-            accepted.push('text/plain');
-        }
+        // Auto-accept the generic MIMEs the sniffer reports for this extension's group
+        const extGroup = mimeGroupOf(baseExt);
+        if (extGroup) accepted.push(...extGroup.generic);
 
         // Sniff buffer MIME
         const bufferMimeRaw = await detectBufferMime(fileBuffer);
         const baseBuf = bufferMimeRaw.split(';')[0].trim();
 
-        if (extMime === 'text/csv') {
-            accepted.push('application/csv');
+        // Content and extension MIME must agree, unless sniffing can't tell them apart (same group)
+        const isMimeMismatch = !areMimesEquivalent(baseBuf, baseExt);
+
+        if (isMimeMismatch) {
+            // ERR104: The file content MIME type does not match the MIME type inferred from its name.
+            fileResult.error_code = 'ERR104';
+            fileResult.message = `File content is detected as "${baseBuf}", but the filename indicates "${baseExt}".`;
+            results.push(fileResult);
+            continue;
         }
 
         if (!matchesWildcard(baseBuf)) {
-            fileResult.message = 'File type not allowed (content).';
+            // ERR105: The detected content MIME type is outside the accept list.
+            fileResult.error_code = 'ERR105';
+            fileResult.message = `Detected file type "${baseBuf}" is not allowed by the accepted MIME types.`;
             results.push(fileResult);
             continue;
         }
 
         // Check for CSV content
         if (baseExt === 'text/csv' && !isCSVBuffer(fileBuffer)) {
-            fileResult.message = 'File type not allowed (content).';
-            fileResult.code = 'ERR101';
+            // ERR106: The file has a CSV extension, but its contents do not have a valid CSV structure.
+            fileResult.error_code = 'ERR106';
+            fileResult.message = 'The file has a CSV extension, but its content is not valid CSV data.';
             results.push(fileResult);
             continue;
         }
 
         // Check for malicious PDF content
         if (detectPdfScripts && baseBuf === 'application/pdf' && hasMaliciousPDFContent(fileBuffer)) {
+            // ERR107: PDF script scanning found an embedded JavaScript action.
+            fileResult.error_code = 'ERR107';
             fileResult.message = 'Embedded JavaScript detected in PDF.';
-            fileResult.code = 'ERR102';
             results.push(fileResult);
             continue;
         }
 
         // Check for malicious SVG content
         if (detectSvgScripts && baseBuf === 'image/svg+xml' && hasMaliciousSVGContent(fileBuffer)) {
+            // ERR108: SVG script scanning found markup or a URL that may execute script.
+            fileResult.error_code = 'ERR108';
             fileResult.message = 'Potential XSS risk: Dangerous SVG content.';
-            fileResult.code = 'ERR103';
             results.push(fileResult);
             continue;
         }
 
-        // All checks passed for this file
+        // All checks passed for this file — error_code is always a string, empty when valid
         fileResult.is_valid = true;
-        fileResult.code = 0;
+        fileResult.error_code = '';
         results.push(fileResult);
     }
 
     // Return overall results
+    const allValid = results.every(r => r.is_valid);
     return {
-        is_valid: results.every(r => r.is_valid),
-        message: results.some(r => !r.is_valid) ? 'Some files failed validation' : 'All files validated successfully',
-        code: results.some(r => !r.is_valid) ? 'ERR101' : 0,
+        is_valid: allValid,
+        message: allValid ? 'All files validated successfully' : 'Some files failed validation',
+        // ERR109: One or more files in the batch failed validation.
+        error_code: allValid ? '' : 'ERR109',
         filesData: results
     };
 };

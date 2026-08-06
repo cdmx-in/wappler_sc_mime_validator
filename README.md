@@ -33,7 +33,7 @@ An object containing the following properties:
 - `is_valid`: A boolean indicating whether the file is valid.
 - `message`: A message describing the validation result.
 - `fileData`: The file data object.
-- `code`: A code representing the validation status (`ERR101`, `ERR102`, or `0` for success).
+- `error_code`: An error code (`ERR101`–`ERR108`, see [Error Codes](#error-codes)); empty string when the file is valid.
 
 ### `Multiple Mime Validator`
 
@@ -54,48 +54,44 @@ An object containing the following properties:
 - `filesData`: An array of objects, each representing the validation result for a file. Each object contains:
   - `is_valid`: Boolean for that file
   - `message`: Validation message for that file
-  - `code`: Status code for that file
-  - `filesData`: Array with a single file data object (name, size, encoding, mimetype, md5, truncated)
-- `code`: A code representing the overall validation status (`ERR101`, `ERR102`, `ERR103`, or `0` for success)
+  - `error_code`: Error code for that file (`ERR101`–`ERR108`); empty string when valid
+  - `fileData`: File data object (name, size, encoding, mimetype, md5, sha256, truncated)
+- `error_code`: The overall status: `ERR101` when no files were uploaded, `ERR109` when any file failed, empty string when all files are valid
 
 #### Example Output
 ```json
 {
-  "is_valid": true,
-  "message": "All files validated successfully",
-  "code": 0,
+  "is_valid": false,
+  "message": "Some files failed validation",
+  "error_code": "ERR109",
   "filesData": [
     {
       "is_valid": true,
-      "message": "File validation successful",
-      "code": 0,
-      "fileData": [
-        {
-          "name": "file1.pdf",
-          "size": 12345,
-          "encoding": "7bit",
-          "mimetype": "application/pdf",
-          "md5": "abc123...",
-          "sha256": "28505cfe...",
-          "truncated": false
-        }
-      ]
+      "message": "",
+      "error_code": "",
+      "fileData": {
+        "name": "file1.pdf",
+        "size": 12345,
+        "encoding": "7bit",
+        "mimetype": "application/pdf",
+        "md5": "abc123...",
+        "sha256": "28505cfe...",
+        "truncated": false
+      }
     },
     {
       "is_valid": false,
-      "message": "File type not allowed (content).",
-      "code": "ERR101",
-      "fileData": [
-        {
-          "name": "file2.exe",
-          "size": 54321,
-          "encoding": "7bit",
-          "mimetype": "application/x-msdownload",
-          "md5": "def456...",
-          "sha256": "28505cfe...",
-          "truncated": false
-        }
-      ]
+      "message": "File type \"application/x-msdos-program\" is not allowed by the accepted MIME types.",
+      "error_code": "ERR103",
+      "fileData": {
+        "name": "file2.exe",
+        "size": 54321,
+        "encoding": "7bit",
+        "mimetype": "application/x-msdownload",
+        "md5": "def456...",
+        "sha256": "28505cfe...",
+        "truncated": false
+      }
     }
   ]
 }
@@ -103,9 +99,17 @@ An object containing the following properties:
 
 ### Error Codes
 
-- `ERR101`: File type not allowed or file missing.
-- `ERR102`: PDF file contains embedded JavaScript.
-- `ERR103`: SVG file contains embedded JavaScript.
+- `ERR101`: No file was uploaded in the given input field.
+- `ERR102`: Unable to read the uploaded file.
+- `ERR103`: The file extension resolves to a MIME type outside the accepted list.
+- `ERR104`: The file content does not match its extension. Mismatches are tolerated within format families that content sniffing cannot tell apart: plain-text formats (sniffed as `text/plain`), ZIP-based documents such as docx/xlsx/pptx/odt/epub (sniffed as `application/zip`), and legacy Office documents such as doc/xls/ppt (sniffed as `application/x-ole-storage`/`CDFV2`).
+- `ERR105`: The detected file content MIME type is outside the accepted list.
+- `ERR106`: The file has a CSV extension, but its content is not valid CSV data.
+- `ERR107`: The PDF contains embedded JavaScript.
+- `ERR108`: The SVG contains potentially dangerous content.
+- `ERR109`: One or more files in the batch failed validation (multiple validator only).
+
+On success, `error_code` is an empty string.
 
 ---
 
