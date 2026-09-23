@@ -2,6 +2,7 @@ const { detectBufferMime, detectFilenameMime } = require('mime-detect');
 const { readFile } = require('fs/promises');
 const { createReadStream } = require('fs');
 const { createHash } = require('crypto');
+const { Parser } = require('htmlparser2');
 
 // Create helper functions in a private scope
 const { hasMaliciousPDFContent, hasMaliciousSVGContent, isCSVBuffer, getFileSHA256 } = (() => {
@@ -21,17 +22,45 @@ const { hasMaliciousPDFContent, hasMaliciousSVGContent, isCSVBuffer, getFileSHA2
         });
     });
 
+    // Parser-based SVG gate. Rejects anything that can run script, load a remote
+    // resource, or embed HTML; keeps fragment refs (#id) and inline raster images.
+    const svgBlockedElements = new Set(['script', 'a', 'foreignobject', 'iframe', 'embed', 'object', 'handler', 'annotation-xml']);
+    const svgSafeHref = /^(#|data:image\/(png|jpe?g|gif|webp);base64,)/i;
+    const svgBadCss = /url\(\s*(?!['"]?\s*#)|@import|expression\(|-moz-binding/i;
+    const local = name => name.toLowerCase().replace(/^[^:]*:/, '');
+
     const hasMaliciousSVGContent = Object.freeze(function (buffer) {
         const text = buffer.toString('utf8');
-        const patterns = Object.freeze([
-            /<script\b/i,
-            /\b(on\w+)="[^"]*"/i,
-            /\b(on\w+)='[^']*'/i,
-            /javascript:/i,
-            /data:text\/html/i,
-            /<[^>]+xlink:href=['"]?javascript:/i,
-        ]);
-        return patterns.some(p => p.test(text));
+        // htmlparser2 skips the DTD internal subset, so catch entity tricks on the raw text
+        if (/<!ENTITY/i.test(text)) return true;
+
+        let bad = false;
+        let inStyle = false;
+        const parser = new Parser({
+            onopentag(rawName, attribs) {
+                const name = local(rawName);
+                if (svgBlockedElements.has(name)) bad = true;
+                if (name === 'style') inStyle = true;
+                for (const [rawAttr, value] of Object.entries(attribs)) {
+                    const attr = local(rawAttr);
+                    const v = value.trim();
+                    if (attr.startsWith('on')) bad = true;
+                    else if (attr === 'href' && !svgSafeHref.test(v)) bad = true;
+                    else if (attr === 'attributename' && /href/i.test(v)) bad = true;
+                    else if (attr === 'style' && svgBadCss.test(v)) bad = true;
+                }
+                if (bad) parser.pause();
+            },
+            ontext(data) {
+                if (inStyle && svgBadCss.test(data)) { bad = true; parser.pause(); }
+            },
+            onclosetag(rawName) {
+                if (local(rawName) === 'style') inStyle = false;
+            },
+        }, { xmlMode: true });
+        parser.write(text);
+        parser.end();
+        return bad;
     });
 
     const isCSVBuffer = Object.freeze(function (buffer) {
@@ -287,14 +316,14 @@ exports.mime_validator = async function (options) {
 
     if (
         detectSvgScripts &&
-        baseBuf === 'image/svg+xml' &&
+        (baseExt === 'image/svg+xml' || baseBuf === 'image/svg+xml') &&
         hasMaliciousSVGContent(fileBuffer)
     ) {
-        // ERR108: SVG script scanning found markup or a URL that may execute script.
+        // ERR108: SVG scan found script, event handlers, external references, or embedded HTML.
         return {
             ...output,
             error_code: 'ERR108',
-            message: 'Potential XSS risk: Dangerous SVG content.',
+            message: 'The SVG contains restricted content.',
         };
     }
 
@@ -440,10 +469,10 @@ exports.mime_validator_multiple = async function (options) {
         }
 
         // Check for malicious SVG content
-        if (detectSvgScripts && baseBuf === 'image/svg+xml' && hasMaliciousSVGContent(fileBuffer)) {
-            // ERR108: SVG script scanning found markup or a URL that may execute script.
+        if (detectSvgScripts && (baseExt === 'image/svg+xml' || baseBuf === 'image/svg+xml') && hasMaliciousSVGContent(fileBuffer)) {
+            // ERR108: SVG scan found script, event handlers, external references, or embedded HTML.
             fileResult.error_code = 'ERR108';
-            fileResult.message = 'Potential XSS risk: Dangerous SVG content.';
+            fileResult.message = 'The SVG contains restricted content.';
             results.push(fileResult);
             continue;
         }
@@ -464,3 +493,6 @@ exports.mime_validator_multiple = async function (options) {
         filesData: results
     };
 };
+
+// Exposed for tests
+exports._hasMaliciousSVGContent = hasMaliciousSVGContent;
