@@ -5,7 +5,7 @@ const { createHash } = require('crypto');
 const { tmpdir } = require('os');
 const path = require('path');
 
-const { mime_validator, mime_validator_multiple } = require('../server_connect/mimeValidator');
+const { mime_validator, mime_validator_multiple, _hasMaliciousSVGContent } = require('../server_connect/mimeValidator');
 
 // Minimal mock of Wappler's Server Connect `this` context
 const ctx = files => ({
@@ -29,6 +29,8 @@ const FIXTURES = {
     'evil.pdf': '%PDF-1.4\n1 0 obj\n<< /Type /Action /S /JavaScript /JS (app.alert(1)) >>\nendobj\ntrailer\n%%EOF\n',
     'clean.svg': '<?xml version="1.0"?>\n<svg xmlns="http://www.w3.org/2000/svg" width="10" height="10"><rect width="10" height="10"/></svg>\n',
     'evil.svg': '<svg xmlns="http://www.w3.org/2000/svg"><script>alert(1)</script></svg>\n',
+    // Long leading comment makes file(1) sniff this as text/plain; the browser still serves it as SVG by extension
+    'sneaky.svg': `<!-- ${'x'.repeat(3000)} -->\n<svg xmlns="http://www.w3.org/2000/svg" onload="alert(1)"/>\n`,
     'pixel.png': Buffer.concat([
         Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
         Buffer.from([0x00, 0x00, 0x00, 0x0d]),
@@ -119,6 +121,11 @@ describe('mime_validator (single)', () => {
     test('ERR108 for SVG with script when detectSvgScripts is on (default)', async () => {
         const res = await run(await upload('evil.svg', fx('evil.svg')), { accepts: 'image/svg+xml' });
         assert.equal(res.is_valid, false);
+        assert.equal(res.error_code, 'ERR108');
+    });
+
+    test('ERR108 for .svg whose content sniffs as text/plain (trigger follows extension)', async () => {
+        const res = await run(await upload('sneaky.svg', fx('sneaky.svg')), { accepts: 'image/svg+xml' });
         assert.equal(res.error_code, 'ERR108');
     });
 
@@ -224,4 +231,45 @@ describe('mime_validator_multiple', () => {
         assert.equal(res.filesData[0].fileData.sha256, '');
         assert.equal(res.filesData[1].is_valid, true);
     });
+});
+
+describe('hasMaliciousSVGContent', () => {
+    const svg = inner => `<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink">${inner}</svg>`;
+    const blocked = {
+        'script element': '<script>1</script>',
+        'unquoted event handler': '<rect onload=alert(1)/>',
+        'mixed-case prefixed handler': '<rect ONLOAD="1"/>',
+        'anchor link': '<a href="https://evil.example"><rect/></a>',
+        'external use': '<use xlink:href="http://evil.example/x.svg#p"/>',
+        'javascript href': '<image href="javascript:alert(1)"/>',
+        'entity-encoded javascript href': '<image href="java&#115;cript:alert(1)"/>',
+        'data:text/html href': '<image href="data:text/html,x"/>',
+        'svg data uri': '<image href="data:image/svg+xml;base64,PHN2Zz4="/>',
+        'animated href swap': '<set attributeName="xlink:href" to="javascript:1"/>',
+        'foreignObject': '<foreignObject><body xmlns="http://www.w3.org/1999/xhtml">x</body></foreignObject>',
+        'iframe': '<iframe src="x"/>',
+        'style import': '<style>@import url(http://evil.example/a.css);</style>',
+        'style attr external url': '<rect style="fill: url(http://evil.example/a)"/>',
+        'style attr expression': '<rect style="width: expression(1)"/>',
+        'cdata style': '<style><![CDATA[ rect { -moz-binding: url(x) } ]]></style>',
+    };
+    const allowed = {
+        'plain shape': '<rect width="1" height="1"/>',
+        'fragment use': '<use href="#id"/>',
+        'fragment xlink use': '<use xlink:href="#id"/>',
+        'fill url fragment': '<rect fill="url(#g)"/>',
+        'style attr quoted fragment': '<rect style="fill: url(\'#g\')"/>',
+        'style element fragment': '<style>rect { fill: url("#g") }</style>',
+        'embedded png': '<image href="data:image/png;base64,iVBORw0KGgo="/>',
+        'prose mentioning javascript:': '<text>use javascript: urls</text>',
+        'prose that looks like an on= attribute': '<desc>Turn on="power"</desc>',
+    };
+    for (const [name, inner] of Object.entries(blocked)) {
+        test(`blocks ${name}`, () => assert.equal(_hasMaliciousSVGContent(Buffer.from(svg(inner))), true));
+    }
+    test('blocks DTD entity declaration', () =>
+        assert.equal(_hasMaliciousSVGContent(Buffer.from('<!DOCTYPE svg [<!ENTITY x "y">]>' + svg('<rect/>'))), true));
+    for (const [name, inner] of Object.entries(allowed)) {
+        test(`allows ${name}`, () => assert.equal(_hasMaliciousSVGContent(Buffer.from(svg(inner))), false));
+    }
 });

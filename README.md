@@ -21,7 +21,7 @@ This extension validates the MIME type of files uploaded via Wappler's Server Co
 - 🎭 **Spoof detection** — content that doesn't match the file extension is rejected (`ERR104`), with smart tolerance for formats sniffing can't tell apart (plain-text families, ZIP-based documents like `docx`/`xlsx`/`odt`, legacy Office OLE files)
 - 📊 **CSV structure check** — files named `.csv` must actually parse as CSV
 - 📄 **PDF script scan** *(optional)* — detects embedded JavaScript actions
-- 🖼️ **SVG script scan** *(on by default)* — detects `<script>`, event handlers, and `javascript:` URLs
+- 🖼️ **SVG script scan** *(on by default)* — parser-based check rejects `<script>`, event handlers, links and external references, embedded HTML, and DTD entities
 - 📦 **Single & multiple uploads** — one action for each, with per-file results and SHA-256 hashes for batches
 
 ## 🔍 How validation flows
@@ -37,7 +37,7 @@ Each file passes through these gates in order — the first failure wins:
 | 5️⃣ | Content MIME in accept list | `ERR105` |
 | 6️⃣ | `.csv` files have CSV structure | `ERR106` |
 | 7️⃣ | PDF free of embedded JavaScript *(if enabled)* | `ERR107` |
-| 8️⃣ | SVG free of dangerous content *(if enabled)* | `ERR108` |
+| 8️⃣ | SVG free of restricted content *(if enabled)* | `ERR108` |
 
 ## ⚙️ Actions
 
@@ -50,7 +50,7 @@ Each file passes through these gates in order — the first failure wins:
 | **Accepts** | ✅ | — | Comma-separated list of acceptable MIME types, e.g. `image/jpeg, image/png` |
 | **Input Name** | ✅ | — | Name of the file input field in the request, e.g. `input_name[]` |
 | **Detect PDF Scripts** | — | ☐ off | Scan PDFs for embedded JavaScript |
-| **Detect SVG Scripts** | — | ☑ on | Scan SVGs for embedded JavaScript / XSS vectors |
+| **Detect SVG Scripts** | — | ☑ on | Reject SVGs with scripts, event handlers, external references, or embedded HTML |
 | **Output** | — | ☐ off | Return the result object described below |
 
 #### Returns
@@ -130,7 +130,7 @@ Same as the single validator — **Input Name** should point to a multi-file inp
 | `ERR105` | The detected file content MIME type is outside the accepted list |
 | `ERR106` | The file has a CSV extension, but its content is not valid CSV data |
 | `ERR107` | The PDF contains embedded JavaScript |
-| `ERR108` | The SVG contains potentially dangerous content |
+| `ERR108` | The SVG contains restricted content (script, event handler, external reference, embedded HTML) |
 | `ERR109` | One or more files in the batch failed validation *(multiple validator only)* |
 
 ✅ On success, `error_code` is an empty string.
